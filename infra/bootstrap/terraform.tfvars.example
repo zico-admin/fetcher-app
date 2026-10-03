@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars (gitignored) and fill in.
+# github_token is NOT set here — export it instead, so it never lands on disk:
+#
+#   export TF_VAR_github_token="github_pat_..."
+
+org_id          = "YOUR_ORG_ID"
+billing_account = "XXXXXX-XXXXXX-XXXXXX"
+admin_email     = "you@example.com"
+
+# Defaults in variables.tf already cover these; uncomment only to override.
+# seed_project_id   = "ogbn-fetcher-seed"
+# dev_project_id    = "ogbn-fetcher-dev"
+# state_bucket_name = "ogbn-fetcher-tfstate"
+# region            = "us-east4"

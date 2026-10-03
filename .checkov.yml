@@ -1,0 +1,22 @@
+# Checkov configuration.
+#
+# Deliberately short. There is no global `skip-check` list: a blanket skip hides
+# a finding everywhere, including in code written months later that genuinely
+# deserves the warning.
+#
+# Disagreements are recorded inline instead, next to the resource they concern:
+#
+#   # checkov:skip=CKV_GCP_117:<why this is wrong here>
+#
+# If you cannot write the reason, fix the finding instead. Four such skips exist
+# today — in wif.tf, ci-service-accounts.tf and github.tf — and each explains what
+# the check wants and why this repo does something different.
+
+framework:
+  - terraform
+
+quiet: true
+compact: true
+
+skip-path:
+  - .terraform
