@@ -155,12 +155,40 @@ git add -A && git commit -m "M0: bootstrap, keyless CI, dev project services"
 git push -u origin m0-bootstrap
 ```
 
-Open a pull request. Expect the `plan` check to run, authenticate with no key, and
-post the plan as a comment. Merge it, then approve the deployment on the `tf-apply`
-environment and watch the apply run.
+Order matters here, and it is the same chicken-and-egg as the state bucket.
 
-**Milestone 0 is done when that happens**: a GitHub Actions job authenticates to
-GCP with no key and plans successfully.
+**If you opened the pull request before applying bootstrap, the `plan` check
+fails**, with:
+
+```
+google-github-actions/auth failed with: the GitHub Action workflow must
+specify exactly one of "workload_identity_provider" or "credentials_json"
+```
+
+That is not a broken workflow. The workflow reads `vars.GCP_WORKLOAD_IDENTITY_PROVIDER`,
+which bootstrap creates; before the apply the variable does not exist, so it
+expands to an empty string and `auth` sees no inputs at all. CI cannot
+authenticate before the identity it authenticates as has been created. The
+preflight step in `infra.yml` now says this directly instead of leaving you with
+the auth error.
+
+So:
+
+1. Apply bootstrap (sections 3 and 4 above) — this creates the WIF provider, the
+   service accounts, and the four `GCP_*` repository variables.
+2. Re-run the failed jobs on the pull request. The `plan` check now authenticates
+   with no key and posts the plan as a comment.
+3. Merge, then approve the deployment on the `tf-apply` environment and watch the
+   apply run.
+
+**Milestone 0 is done when step 2 succeeds**: a GitHub Actions job authenticates
+to GCP with no key and plans successfully.
+
+One thing to watch on the bootstrap apply if the workflow has already run against
+main: GitHub creates an environment on demand when a job references one, so
+`tf-apply` may already exist — without its reviewer. If Terraform reports that the
+environment already exists, adopt it with an `import` block rather than deleting
+it in the UI, the same way the repository itself is adopted.
 
 ---
 

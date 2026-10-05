@@ -59,6 +59,31 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
 
+      # Without this, a missing variable surfaces as "auth failed with: the
+      # GitHub Action workflow must specify exactly one of
+      # workload_identity_provider or credentials_json" — which reads like a
+      # broken workflow and is actually just bootstrap not having run yet.
+      #
+      # Values arrive through `env:` rather than being interpolated straight into
+      # the script. ${{ }} is substituted as raw text before the shell sees it, so
+      # anything attacker-controlled becomes shell code. These particular values
+      # are not, but the habit is what keeps the one that matters from slipping in.
+      - name: Preflight — CI variables exist
+        env:
+          WIF_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          PLAN_SA: ${{ vars.GCP_TF_PLAN_SA }}
+        run: |
+          missing=""
+          [ -n "$WIF_PROVIDER" ] || missing="$missing GCP_WORKLOAD_IDENTITY_PROVIDER"
+          [ -n "$PLAN_SA" ] || missing="$missing GCP_TF_PLAN_SA"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository variables:$missing"
+            echo "These are created by the bootstrap apply, which has not run yet."
+            echo "CI cannot authenticate before then: there is no identity to"
+            echo "authenticate as. See docs/runbooks/bootstrap.md."
+            exit 1
+          fi
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
@@ -174,6 +199,21 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
+
+      - name: Preflight — CI variables exist
+        env:
+          WIF_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          APPLY_SA: ${{ vars.GCP_TF_APPLY_SA }}
+        run: |
+          missing=""
+          [ -n "$WIF_PROVIDER" ] || missing="$missing GCP_WORKLOAD_IDENTITY_PROVIDER"
+          [ -n "$APPLY_SA" ] || missing="$missing GCP_TF_APPLY_SA"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository variables:$missing"
+            echo "These are created by the bootstrap apply, which has not run yet."
+            echo "See docs/runbooks/bootstrap.md."
+            exit 1
+          fi
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
