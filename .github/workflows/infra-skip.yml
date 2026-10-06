@@ -1,0 +1,32 @@
+#  The companion to infra.yml, and the reason it exists is not obvious.
+#
+# main requires the "plan" status check. infra.yml only runs on changes under
+# infra/**, so a pull request that touches only docs never runs it — and a
+# required check that never reports stays pending forever, blocking the merge.
+# The usual "fix" is to bypass protection for such PRs, which trains you to
+# bypass it generally.
+#
+# Instead this workflow reports the same check name for exactly the pull requests
+# infra.yml ignores. The path filters are complementary, so precisely one of the
+# two runs: a PR touching infra/** gets the real plan, anything else gets this.
+#
+# The job name must stay "plan" — that string is the status check that branch
+# protection requires, and is set in infra/bootstrap/github.tf.
+name: infra (no infrastructure changes)
+
+on:
+  pull_request:
+    paths-ignore:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report
+        run: echo "No changes under infra/ — the real plan job did not need to run."
