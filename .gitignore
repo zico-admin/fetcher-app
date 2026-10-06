@@ -15,7 +15,10 @@
 # nothing confidential.
 infra/bootstrap/terraform.tfvars
 
-# Plan output can contain resource attributes that are sensitive.
+# A saved plan contains every resource attribute, including sensitive ones — it
+# is as confidential as state. `tfplan` with no extension is listed explicitly
+# because that is the name the runbook and CI use, and it does NOT match *.tfplan.
+tfplan
 *.tfplan
 plan.out
 plan.txt
