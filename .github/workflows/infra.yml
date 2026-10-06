@@ -200,30 +200,6 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
 
-      # TEMPORARY — remove once the apply identity authenticates.
-      #
-      # The apply job is denied iam.serviceAccounts.getAccessToken even though the
-      # binding on tf-apply matches the subject GitHub documents for an
-      # environment job. Rather than keep guessing, print the claims the token
-      # actually carries. The token itself is never echoed — only selected claims,
-      # none of which is a secret.
-      - name: Debug — OIDC claims
-        env:
-          AUDIENCE: https://iam.googleapis.com/${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-        run: |
-          TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}" | python3 -c 'import sys,json;print(json.load(sys.stdin)["value"])')
-          TOKEN="$TOKEN" python3 <<'PY'
-          import base64, json, os
-          payload = os.environ["TOKEN"].split(".")[1]
-          payload += "=" * (-len(payload) % 4)
-          claims = json.loads(base64.urlsafe_b64decode(payload))
-          for key in ("sub", "aud", "repository", "repository_id",
-                      "repository_owner_id", "environment", "event_name",
-                      "ref", "workflow_ref"):
-              print(f"{key:21} {claims.get(key)!r}")
-          PY
-
       - name: Preflight — CI variables exist
         env:
           WIF_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}

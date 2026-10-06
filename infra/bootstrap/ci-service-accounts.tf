@@ -32,17 +32,54 @@ resource "google_service_account_iam_member" "tf_plan_wif" {
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository_id/${data.github_repository.fetcher.repo_id}"
 }
 
-# Apply is bound to ONE exact subject: a job running in the tf-apply environment.
+# Apply is bound to an exact subject: a job running in the tf-apply environment.
 # `principal://` with a full subject, not `principalSet://` with an attribute —
 # this is a single identity, not a set.
 #
 # The useful consequence: the required reviewer on that environment is enforced by
 # the token exchange itself. A workflow that forgets `environment: tf-apply`
 # cannot authenticate at all, rather than quietly applying without review.
+#
+# Two subjects, because GitHub does not issue the subject its own documentation
+# describes. Observed in the token on 2026-10-06:
+#
+#   repo:zico-admin@199652266/fetcher-app@1370482956:environment:tf-apply
+#
+# rather than the documented:
+#
+#   repo:zico-admin/fetcher-app:environment:tf-apply
+#
+# GitHub has started embedding the numeric owner and repository ids in the
+# subject — the same defence against name reuse that this repo applies in the
+# provider's attribute_condition. Binding both forms means a rollout in either
+# direction cannot lock the apply identity out. Neither is weaker: both name one
+# exact job in one exact repository in one exact environment.
+#
+# The ids come from the API via data sources, so no numeric id is hand-copied.
+locals {
+  tf_apply_subjects = toset([
+    # Current: ids embedded.
+    "repo:${var.github_owner}@${data.github_user.admin.id}/${var.github_repo}@${data.github_repository.fetcher.repo_id}:environment:${var.tf_apply_environment}",
+    # Documented, and what GitHub issued historically.
+    "repo:${var.github_owner}/${var.github_repo}:environment:${var.tf_apply_environment}",
+  ])
+}
+
 resource "google_service_account_iam_member" "tf_apply_wif" {
+  for_each = local.tf_apply_subjects
+
   service_account_id = google_service_account.tf_apply.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principal://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/subject/repo:${var.github_owner}/${var.github_repo}:environment:${var.tf_apply_environment}"
+  member             = "principal://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/subject/${each.value}"
+}
+
+# The binding above went from one resource to a keyed set. Without this, Terraform
+# would destroy the existing binding and create a new one; the moved block tells it
+# the resource simply has a new address (§5). The key must be a literal, so the
+# historical subject is spelled out here rather than interpolated.
+moved {
+  from = google_service_account_iam_member.tf_apply_wif
+  to   = google_service_account_iam_member.tf_apply_wif["repo:zico-admin/fetcher-app:environment:tf-apply"]
 }
 
 # --- What they may do ---------------------------------------------------------
