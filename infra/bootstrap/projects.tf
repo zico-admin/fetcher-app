@@ -76,6 +76,19 @@ resource "google_project" "dev" {
 
   auto_create_network = false
   deletion_policy     = "PREVENT"
+
+  # Ordering is a security control here, not a convenience.
+  #
+  # auto_create_network = false makes the provider create the default network and
+  # immediately delete it, which enables compute during project creation, which
+  # mints a default service account holding roles/editor. The folder policy must
+  # therefore be enforced BEFORE this project exists, or the account is created
+  # privileged and the policy arrives too late to matter. See org-policy.tf.
+  #
+  # Rebuilt from nothing, this ordering means dev never has a privileged default
+  # account at any point. It cannot retroactively fix the one that already
+  # exists — google_project_default_service_accounts does that.
+  depends_on = [google_org_policy_policy.no_automatic_iam_grants]
 }
 
 module "seed_services" {
