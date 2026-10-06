@@ -52,6 +52,7 @@ resource "google_folder" "fetcher" {
 # the CI identity, the WIF pool. If dev is ever destroyed or rebuilt, none of that
 # is at risk, and prod at M5 is a third project rather than a second bootstrap.
 resource "google_project" "seed" {
+  # checkov:skip=CKV2_GCP_5:The check wants an audit config for allServices, which would turn on DATA_READ/DATA_WRITE logging for every API in the project — high-volume, billed noise. Data access logging is enabled deliberately for the one service that matters, storage on the seed project (see audit-logs.tf); Admin Activity logs are always on.
   name            = "Fetcher Seed"
   project_id      = var.seed_project_id
   folder_id       = google_folder.fetcher.folder_id
@@ -68,6 +69,7 @@ resource "google_project" "seed" {
 }
 
 resource "google_project" "dev" {
+  # checkov:skip=CKV2_GCP_5:The check wants an audit config for allServices, which would turn on DATA_READ/DATA_WRITE logging for every API in the project — high-volume, billed noise. Admin Activity logs are always on and record every configuration change; the dev project holds no state or secrets worth a data-access trail.
   name            = "Fetcher Dev"
   project_id      = var.dev_project_id
   folder_id       = google_folder.fetcher.folder_id

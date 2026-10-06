@@ -19,3 +19,9 @@ variable "environment" {
     error_message = "Environment must be dev or prod; each lives in its own directory and its own project."
   }
 }
+
+variable "quota_project_id" {
+  description = "Seed project that API calls are billed to. CI identities hold serviceusage.services.use on it (bootstrap)."
+  type        = string
+  default     = "ogbn-fetcher-seed"
+}
