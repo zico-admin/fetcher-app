@@ -50,12 +50,32 @@ Fine-grained PAT on `zico-admin/fetcher-app`, with these repository permissions:
 | Variables | Read and write | the four `GCP_*` Actions variables |
 | Metadata | Read | implied by the others |
 
+Create it at **Settings → Developer settings → Personal access tokens → Fine-grained
+tokens**, with resource owner `zico-admin` and only the `fetcher-app` repository
+selected. Give it a short expiry — 7 days is generous for something used once.
+
 It is used by this apply only. It never reaches CI, and it is never written to
-disk:
+disk. Read it in rather than typing it on the command line, so it stays out of
+shell history entirely:
 
 ```bash
-export TF_VAR_github_token="github_pat_..."
+read -rs "?GitHub token: " TF_VAR_github_token && export TF_VAR_github_token
 ```
+
+Then confirm the shell actually holds a token, without printing it:
+
+```bash
+printf 'length: %s\n' "${#TF_VAR_github_token}"   # ~93 fine-grained, 40 classic
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: Bearer $TF_VAR_github_token" https://api.github.com/user
+```
+
+A length of 14 means the literal placeholder text was exported instead of a
+token. A 401 from Terraform means a value was sent and rejected; an empty
+variable would produce a 404 instead, because `zico-admin` is a user account and
+unauthenticated lookups of a nonexistent *organization* return "not found".
+Export in the same terminal tab you run Terraform from — `export` does not cross
+tabs.
 
 ---
 
