@@ -1,0 +1,39 @@
+# Terraform state is a secret: it stores generated passwords and secret values in
+# plaintext. This file exists BEFORE the first apply, not after — committing state
+# once means rewriting history, and by then it is already on GitHub.
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform/
+.terraform.tfstate.lock.info
+
+# Real variable files hold project ids, billing account ids and tokens.
+# The .example files are committed; these are not.
+*.auto.tfvars
+# Only bootstrap's tfvars is withheld (org and billing account ids, and the repo
+# is public). Environment tfvars ARE committed — CI needs them and they hold
+# nothing confidential.
+infra/bootstrap/terraform.tfvars
+
+# A saved plan contains every resource attribute, including sensitive ones — it
+# is as confidential as state. `tfplan` with no extension is listed explicitly
+# because that is the name the runbook and CI use, and it does NOT match *.tfplan.
+tfplan
+*.tfplan
+plan.out
+plan.txt
+
+# Credentials. There should never be a service account key in this repo —
+# that is the whole point of Workload Identity Federation (§6).
+*-key.json
+*credentials*.json
+.env
+.env.*
+
+# Node / Next.js (M3 onward)
+node_modules/
+.next/
+coverage/
+
+# macOS
+.DS_Store

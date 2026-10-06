@@ -1,0 +1,17 @@
+# Copy to terraform.tfvars (gitignored) and fill in.
+# github_token is NOT set here — read it in instead, so it never lands on disk
+# or in shell history. Paste the real token at the prompt; do not type a
+# placeholder (a 14-character "github_pat_..." authenticates as garbage and GitHub
+# answers 401):
+#
+#   read -rs "?GitHub token: " TF_VAR_github_token && export TF_VAR_github_token
+
+org_id          = "000000000000"          # gcloud organizations list
+billing_account = "XXXXXX-XXXXXX-XXXXXX"  # gcloud billing accounts list
+admin_email     = "you@example.com"       # gets state bucket access and every alert
+
+# Defaults in variables.tf already cover these; uncomment only to override.
+# seed_project_id   = "ogbn-fetcher-seed"
+# dev_project_id    = "ogbn-fetcher-dev"
+# state_bucket_name = "ogbn-fetcher-tfstate"
+# region            = "us-east4"

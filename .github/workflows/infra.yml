@@ -1,0 +1,232 @@
+name: infra
+
+# Infrastructure and application changes are separate workflows on purpose (§7):
+# different blast radius, different review, different rollback. A bad app deploy
+# is one revision rollback; a bad terraform apply can delete a database.
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+
+# Least privilege at the workflow level too. Jobs opt in to more.
+permissions:
+  contents: read
+
+# Two applies must never race. Plans for the same PR may cancel each other, since
+# only the newest matters.
+concurrency:
+  group: infra-dev-${{ github.event_name == 'push' && 'apply' || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Pinned exactly, matching .terraform-version. "latest" in CI means your
+  # infrastructure changes when someone else ships a release.
+  TF_VERSION: "1.16.4"
+  TF_IN_AUTOMATION: "true"
+  WORKDIR: infra/envs/dev
+
+jobs:
+  plan:
+    name: plan
+    # Fork pull requests are skipped. GitHub withholds the OIDC token from forks,
+    # so this job could not authenticate anyway — skipping makes the reason
+    # explicit instead of letting a stranger's PR fail confusingly.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write # required for OIDC; easy to forget, and nothing works without it
+      pull-requests: write # to post the plan comment
+
+    steps:
+      # Every third-party action is pinned to a full commit SHA, not a tag. Tags
+      # are mutable: whoever controls the repo can repoint v4 at new code, which is
+      # how several real supply-chain attacks on Actions have worked.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      # Without this, a missing variable surfaces as "auth failed with: the
+      # GitHub Action workflow must specify exactly one of
+      # workload_identity_provider or credentials_json" — which reads like a
+      # broken workflow and is actually just bootstrap not having run yet.
+      #
+      # Values arrive through `env:` rather than being interpolated straight into
+      # the script. ${{ }} is substituted as raw text before the shell sees it, so
+      # anything attacker-controlled becomes shell code. These particular values
+      # are not, but the habit is what keeps the one that matters from slipping in.
+      - name: Preflight — CI variables exist
+        env:
+          WIF_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          PLAN_SA: ${{ vars.GCP_TF_PLAN_SA }}
+        run: |
+          missing=""
+          [ -n "$WIF_PROVIDER" ] || missing="$missing GCP_WORKLOAD_IDENTITY_PROVIDER"
+          [ -n "$PLAN_SA" ] || missing="$missing GCP_TF_PLAN_SA"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository variables:$missing"
+            echo "These are created by the bootstrap apply, which has not run yet."
+            echo "CI cannot authenticate before then: there is no identity to"
+            echo "authenticate as. See docs/runbooks/bootstrap.md."
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_TF_PLAN_SA }}
+
+      - name: Format check
+        run: terraform fmt -check -recursive -diff
+        working-directory: infra
+
+      - name: Init
+        run: terraform init -input=false
+        working-directory: ${{ env.WORKDIR }}
+
+      - name: Validate
+        run: terraform validate -no-color
+        working-directory: ${{ env.WORKDIR }}
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
+        with:
+          tflint_version: latest
+
+      - name: TFLint
+        # --recursive makes tflint chdir into each directory, so the shared config
+        # has to be an absolute path or each module would silently lint with
+        # defaults instead.
+        run: |
+          tflint --init --config="${{ github.workspace }}/.tflint.hcl"
+          tflint --recursive --format compact --config="${{ github.workspace }}/.tflint.hcl"
+        working-directory: infra
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # ruleset downloads are rate limited without it
+
+      - name: Checkov
+        uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
+        with:
+          directory: infra
+          config_file: .checkov.yml
+          framework: terraform
+          quiet: true
+          soft_fail: false # findings fail the build; disagree in .checkov.yml, with a reason
+
+      - name: Plan
+        id: plan
+        # -lock=false because the plan identity is read-only and cannot write the
+        # lock object (deviation D8). A plan mutates nothing; the concurrency group
+        # above is what keeps applies from overlapping.
+        run: |
+          terraform plan -lock=false -input=false -no-color -out=tfplan
+          terraform show -no-color tfplan > plan.txt
+        working-directory: ${{ env.WORKDIR }}
+
+      - name: Comment plan on PR
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs');
+            const max = 60000; // GitHub rejects comments above ~65k
+            let plan = fs.readFileSync('${{ env.WORKDIR }}/plan.txt', 'utf8');
+            if (plan.length > max) {
+              plan = plan.slice(0, max) + '\n\n... truncated, read the full plan in the job log.';
+            }
+            const body = [
+              '### Terraform plan — `${{ env.WORKDIR }}`',
+              '',
+              'Read this before approving the apply. Look for **destroy** and **replace** lines first.',
+              '',
+              '```terraform',
+              plan,
+              '```',
+            ].join('\n');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.startsWith('### Terraform plan'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: context.issue.number, body,
+              });
+            }
+
+  apply:
+    name: apply
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    # The gate. This environment requires your review before the job starts, and
+    # the apply service account can ONLY be impersonated from a job that declares
+    # it — the WIF binding keys on the subject repo:OWNER/REPO:environment:tf-apply.
+    # Remove this line and the job cannot authenticate at all.
+    environment: tf-apply
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Preflight — CI variables exist
+        env:
+          WIF_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          APPLY_SA: ${{ vars.GCP_TF_APPLY_SA }}
+        run: |
+          missing=""
+          [ -n "$WIF_PROVIDER" ] || missing="$missing GCP_WORKLOAD_IDENTITY_PROVIDER"
+          [ -n "$APPLY_SA" ] || missing="$missing GCP_TF_APPLY_SA"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository variables:$missing"
+            echo "These are created by the bootstrap apply, which has not run yet."
+            echo "See docs/runbooks/bootstrap.md."
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_TF_APPLY_SA }}
+
+      - name: Init
+        run: terraform init -input=false
+        working-directory: ${{ env.WORKDIR }}
+
+      - name: Apply
+        # -auto-approve is correct here and nowhere else: the human approval
+        # already happened at the environment gate, and there is no TTY to prompt.
+        run: terraform apply -auto-approve -input=false -lock-timeout=5m
+        working-directory: ${{ env.WORKDIR }}
