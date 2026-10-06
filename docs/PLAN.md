@@ -15,8 +15,8 @@ left open, and every place this plan deliberately departs from the brief.
 
 | # | Decision | Value |
 |---|---|---|
-| 1 | Human identity | `you@example.com` — state bucket IAM, Cloud SQL IAM user, IAP admin, alert/budget email |
-| 2 | Projects | New projects created by Terraform: seed + dev (+ prod at M5), in a `fetcher` folder under org `YOUR_ORG_ID`, billing `XXXXXX-XXXXXX-XXXXXX` |
+| 1 | Human identity | The Google account that applies bootstrap — state bucket IAM, Cloud SQL IAM user, IAP admin, alert and budget email |
+| 2 | Projects | New projects created by Terraform: seed + dev (+ prod at M5), in a `fetcher` folder under the organization, on the open billing account. Both ids live in the gitignored `terraform.tfvars` |
 | 3 | Org policy | `automaticIamGrantsForDefaultServiceAccounts` enforced **per project**, not org-wide |
 | 4 | Region | `us-east4` (Vertex AI is the documented exception) |
 | 5 | GitHub repo | **Public** — gives the real environment-reviewer gate |

@@ -14,7 +14,7 @@ variable "billing_account" {
 
   validation {
     condition     = can(regex("^[A-F0-9]{6}-[A-F0-9]{6}-[A-F0-9]{6}$", var.billing_account))
-    error_message = "billing_account must look like XXXXXX-XXXXXX-XXXXXX."
+    error_message = "billing_account must look like 0A1B2C-3D4E5F-6A7B8C."
   }
 }
 
@@ -96,7 +96,6 @@ variable "tf_apply_environment" {
 variable "admin_email" {
   description = "Human owner. Gets state bucket access, alert emails and budget notifications."
   type        = string
-  default     = "you@example.com"
 
   validation {
     condition     = can(regex("^[^@]+@[^@]+\\.[^@]+$", var.admin_email))

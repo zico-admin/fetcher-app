@@ -32,8 +32,8 @@ brew install tflint checkov
 
 ### Google credentials
 
-Bootstrap runs as you, `you@example.com`, which holds `roles/resourcemanager.projectCreator`
-and `roles/billing.admin`.
+Bootstrap runs as you: the Google account holding `roles/resourcemanager.projectCreator`
+on the organization and `roles/billing.admin` on the billing account.
 
 ```bash
 gcloud auth application-default login
