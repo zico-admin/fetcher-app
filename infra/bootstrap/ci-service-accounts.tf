@@ -105,6 +105,22 @@ locals {
   # iam.serviceAccountAdmin, resourcemanager.projectIamAdmin. Do not add them now.
   tf_apply_roles = toset([
     "roles/serviceusage.serviceUsageAdmin",
+
+    # Added M0, from a denial rather than a guess.
+    #
+    # The apply failed with "Error when reading or editing Project Service
+    # ogbn-fetcher-dev/logging.googleapis.com: 403". Reading the role showed why:
+    # serviceUsageAdmin grants serviceusage.services.enable/get/list but NOT
+    # resourcemanager.projects.get, and the provider reads the project while
+    # reconciling every google_project_service.
+    #
+    # roles/browser is the narrowest predefined role carrying it: read-only
+    # metadata about projects, folders and the org, and nothing else. Narrower
+    # than roles/viewer, which would grant read on every resource in the project.
+    # A custom role with the single permission would be narrower still; it is not
+    # worth the maintenance here, because every later milestone needs this same
+    # project read.
+    "roles/browser",
   ])
 }
 
