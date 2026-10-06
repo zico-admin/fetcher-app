@@ -19,7 +19,14 @@ roles/editor  serviceAccount:781463442713-compute@developer.gserviceaccount.com
 ```
 
 The policy was enforced, and `gcloud org-policies describe` confirmed
-`enforce: true` on the dev project. It simply arrived too late.
+`enforce: true` on the dev project. It simply arrived too late — by about five
+minutes, from the dev project's own audit log:
+
+| Time (2026-10-06) | Event |
+|---|---|
+| 01:00:22 | Project creation enables services. No `serviceIds` recorded: the single `EnableService` calls, compute among them, for the network that exists momentarily |
+| 01:03:54 | `cloudresourcemanager`, `orgpolicy`, `iam` enabled — `dev_bootstrap_services` |
+| **01:05:13** | **Policy enforced.** The default account has held editor for five minutes |
 
 ## Why a project-level policy cannot work
 
