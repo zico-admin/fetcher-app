@@ -16,6 +16,10 @@ locals {
     "orgpolicy.googleapis.com",            # the policy in org-policy.tf
     "billingbudgets.googleapis.com",       # the budget in budget.tf
     "monitoring.googleapis.com",           # budget notification channel
+    # audit-logs.tf turns on DATA_READ/DATA_WRITE audit logging for storage here.
+    # Those entries are written regardless, but reading them needs this API — and
+    # an audit log you cannot read is not an audit log.
+    "logging.googleapis.com",
   ])
 
   # Only what bootstrap itself needs on dev. Everything else dev needs is owned by
