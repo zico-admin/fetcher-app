@@ -36,6 +36,42 @@ environment in the token's subject, a workflow that drops `environment: tf-apply
 cannot authenticate **at all**. The human approval is enforced by GCP, not only by
 GitHub's UI.
 
+## The first apply of a new environment
+
+A plan cannot be the first thing that runs against a brand-new environment, and
+this surprises people. Expect it again when `envs/prod` is created at M5.
+
+On a PR touching a never-applied environment, `terraform init` fails with:
+
+```
+Error loading state: writing "gs://.../envs/dev/default.tflock" failed:
+403 ... does not have storage.objects.create access
+```
+
+The GCS backend, finding no state object, tries to create one — and takes a lock
+to do it. That is a write, during `init`, before `plan` ever runs, so the
+`-lock=false` on the plan step is irrelevant. `tf-plan` is read-only and refuses.
+
+**Do not fix this by granting the plan identity write access.** In GCS,
+`storage.objects.create` also overwrites existing objects, so that one permission
+would let any pull request rewrite your state.
+
+**Do not pre-create a placeholder state object from bootstrap either.**
+`google_storage_bucket_object` tracks its content, so after the environment
+applied for real, bootstrap's next plan would propose replacing live state with
+the empty placeholder.
+
+The sequence that works:
+
+1. Merge the pull request. The `plan` check cannot pass yet; `enforce_admins` is
+   false precisely so you can merge this once without disabling protection.
+2. The apply job runs on main as `tf-apply`, which holds `objectAdmin` on the
+   `envs/` prefix. It creates the state object.
+3. Every plan after that is a pure read, and the check behaves normally.
+
+In other words, the first write to an environment's state is always an apply, by
+the only identity allowed to write. That is the property you want.
+
 ## Adding a permission (the least-privilege loop)
 
 This is the intended workflow, not a workaround. Do not pre-grant roles.
