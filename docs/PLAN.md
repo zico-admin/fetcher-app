@@ -163,12 +163,22 @@ decisive is genuinely unknown:
 - `user_project_override` with the seed project as `billing_project` (PR #4),
   plus `roles/serviceusage.serviceUsageConsumer` on seed for both CI identities.
 
-**Resolved by experiment (PR #15).** The quota override was removed and the apply
-on main still succeeded, so `roles/browser` was the fix. The override and the
-`serviceUsageConsumer` grants it required are gone, and prod will not inherit a
-shared quota project. Worth repeating as a habit: when two fixes land together,
-one of them is probably unnecessary, and removing it is cheap while nothing
-depends on it yet.
+**Half resolved by experiment (PR #15), then corrected (PR #19).** Removing the
+quota override and re-applying succeeded, so `roles/browser` was indeed the fix
+for the `google_project_service` 403. The conclusion drawn from that — that the
+override did nothing — was too broad, and M1 proved it: creating the Private
+Service Access peering failed because, without `user_project_override`, API
+calls are billed to the project owning the credentials (seed), where Service
+Networking is not enabled.
+
+The override is back, pointing at the **dev** project rather than seed as PR #4
+had it, so calls are billed where the APIs are and no environment shares
+another's quota.
+
+The habit worth keeping is still "when two fixes land together, one may be
+unnecessary". The one to add: an experiment proves only what it exercised. This
+one exercised `google_project_service` and was read as a verdict on every API
+call Terraform makes.
 
 One prediction of mine was simply wrong: Dependabot pull requests authenticate
 and plan fine, so no credential-free lint path was needed.
