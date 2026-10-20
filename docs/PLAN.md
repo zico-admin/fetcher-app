@@ -1,7 +1,10 @@
 # Fetcher — Build Plan
 
-Status: **signed off 2026-10-03**. Milestone 0 is written and passes fmt, validate,
-tflint and checkov locally; it has not been applied yet.
+Status: **Milestone 0 complete, 2026-10-06.** Verified against GCP and the GitHub
+API rather than from apply output: CI authenticates with no key, `terraform plan`
+runs on pull requests and posts its plan, apply on main is gated by a human, state
+lives in GCS, no user-managed service account keys exist, and no default compute
+service account holds `roles/editor`. Milestone 1 awaits sign-off.
 
 Source of truth for requirements: [FETCHER-BRIEF.md](../FETCHER-BRIEF.md).
 This document records how the brief gets implemented, every decision the brief
@@ -127,13 +130,54 @@ verification plus a deny-by-default middleware test.
 
 ---
 
+## 1.4 What Milestone 0 actually cost, and what it taught
+
+Four things went wrong that no amount of careful reading would have caught. Each
+is written up where it will be needed again at M5, when `envs/prod` is created.
+
+**GitHub issues an OIDC subject its own documentation does not describe.** The
+apply identity was denied for hours against a binding that was character-for-
+character the documented format. The real claim was
+`repo:owner@<owner_id>/<repo>@<repo_id>:environment:<env>`. Found only by
+printing the claim from a temporary workflow step. Both forms are now bound.
+
+**Our own good practice created the §8.12 vulnerability.** `auto_create_network
+= false` makes the provider create the default network and delete it, which
+enables compute *during project creation*, which mints a default service account
+holding `roles/editor` — about five minutes before a project-scoped org policy
+could exist. Both projects were affected. The policy moved to the folder, and
+the existing accounts were deprivileged. See ADR 0002.
+
+**A plan cannot be the first thing to touch a new environment.** With no state
+object, the GCS backend tries to create one during `init`, and the read-only
+plan identity correctly refuses. The first write to an environment's state must
+come from the apply identity.
+
+**The dev apply was denied on every `google_project_service`**, and two
+independent fixes landed for it in the same bootstrap apply, so which one was
+decisive is genuinely unknown:
+
+- `roles/browser`, because `roles/serviceusage.serviceUsageAdmin` does not carry
+  `resourcemanager.projects.get`, which the provider needs to reconcile a
+  `google_project_service`.
+- `user_project_override` with the seed project as `billing_project` (PR #4),
+  plus `roles/serviceusage.serviceUsageConsumer` on seed for both CI identities.
+
+Keeping both is redundant, and the second couples every environment's API quota
+to the seed project — prod would share dev's limits. Worth one experiment at the
+start of M1: remove the quota override, apply, and see whether `roles/browser`
+alone suffices. Whichever survives gets a comment recording the evidence.
+
+One prediction of mine was simply wrong: Dependabot pull requests authenticate
+and plan fine, so no credential-free lint path was needed.
+
 ## 2. Milestones
 
 Renumbered because of D5 and the new prod milestone. Brief numbers in brackets.
 
 | # | Milestone | Done when |
 |---|---|---|
-| **M0** | [0] Bootstrap: projects, folder, org policy, state bucket, WIF, CI SAs, budget, GitHub config; state migrated to GCS; `envs/dev` with project-services only | A PR posts a real plan; merging to main applies it after your environment approval; no key exists anywhere |
+| **M0** ✅ | [0] Bootstrap: projects, folder, org policy, state bucket, WIF, CI SAs, budget, GitHub config; state migrated to GCS; `envs/dev` with project-services only | **Done 2026-10-06.** A PR posts a real plan; merging to main applies it after your environment approval; no key exists anywhere |
 | **M1** | [1] Network, Cloud SQL (private IP, IAM auth), Artifact Registry, Secret Manager, GCS snapshots bucket | CI applies it; a Cloud Run job inside the VPC reaches the DB; nothing public can |
 | **M2** | [2] Cloud Run service (hello-world), both workflows complete | Merge to main deploys a SHA-tagged revision |
 | **M3** | [3] Schema, migrations, scoring function with tests — no UI | `pnpm test` passes; a script ranks a hand-seeded venue set. **Also: open the Twilio account and start A2P registration** |
