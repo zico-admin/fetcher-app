@@ -5,10 +5,18 @@ name: infra
 # is one revision rollback; a bad terraform apply can delete a database.
 
 on:
+  # No paths filter on pull_request, deliberately.
+  #
+  # main requires the "plan" check. With a filter, a pull request touching no
+  # infrastructure never reports it and waits forever; a companion workflow
+  # reporting the same check name fixed that and created a worse problem — a
+  # mixed pull request triggered BOTH, producing two checks named "plan", and
+  # which one branch protection honours is ambiguous. A failing real plan beside
+  # a passing stub is not a gate.
+  #
+  # So the job always runs and decides for itself whether there is anything to
+  # plan. One workflow, one check, no ambiguity.
   pull_request:
-    paths:
-      - "infra/**"
-      - ".github/workflows/infra.yml"
   push:
     branches: [main]
     paths:
@@ -52,8 +60,29 @@ jobs:
       # how several real supply-chain attacks on Actions have worked.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # needed to diff against the base branch
+
+      # This replaces the old paths: filter. Every step after it is conditional,
+      # so a docs-only pull request still reports "plan" as a pass without
+      # authenticating to GCP or running Terraform at all.
+      - name: Detect infrastructure changes
+        id: detect
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- infra/ .github/workflows/infra.yml)
+          if [ -n "$changed" ]; then
+            echo "infra=true" >> "$GITHUB_OUTPUT"
+            printf 'Infrastructure files changed:\n%s\n' "$changed"
+          else
+            echo "infra=false" >> "$GITHUB_OUTPUT"
+            echo "No changes under infra/ — nothing to plan."
+          fi
 
       - name: Setup Terraform
+        if: steps.detect.outputs.infra == 'true'
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: ${{ env.TF_VERSION }}
@@ -69,6 +98,7 @@ jobs:
       # anything attacker-controlled becomes shell code. These particular values
       # are not, but the habit is what keeps the one that matters from slipping in.
       - name: Preflight — CI variables exist
+        if: steps.detect.outputs.infra == 'true'
         env:
           WIF_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           PLAN_SA: ${{ vars.GCP_TF_PLAN_SA }}
@@ -85,29 +115,35 @@ jobs:
           fi
 
       - name: Authenticate to Google Cloud
+        if: steps.detect.outputs.infra == 'true'
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_TF_PLAN_SA }}
 
       - name: Format check
+        if: steps.detect.outputs.infra == 'true'
         run: terraform fmt -check -recursive -diff
         working-directory: infra
 
       - name: Init
+        if: steps.detect.outputs.infra == 'true'
         run: terraform init -input=false
         working-directory: ${{ env.WORKDIR }}
 
       - name: Validate
+        if: steps.detect.outputs.infra == 'true'
         run: terraform validate -no-color
         working-directory: ${{ env.WORKDIR }}
 
       - name: Setup TFLint
+        if: steps.detect.outputs.infra == 'true'
         uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
         with:
           tflint_version: latest
 
       - name: TFLint
+        if: steps.detect.outputs.infra == 'true'
         # --recursive makes tflint chdir into each directory, so the shared config
         # has to be an absolute path or each module would silently lint with
         # defaults instead.
@@ -119,6 +155,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }} # ruleset downloads are rate limited without it
 
       - name: Checkov
+        if: steps.detect.outputs.infra == 'true'
         uses: bridgecrewio/checkov-action@6f26dc90000b74feb589a906cdfae540f5119895 # v12.3134.0
         with:
           directory: infra
@@ -128,6 +165,7 @@ jobs:
           soft_fail: false # findings fail the build; disagree in .checkov.yml, with a reason
 
       - name: Plan
+        if: steps.detect.outputs.infra == 'true'
         id: plan
         # -lock=false because the plan identity is read-only and cannot write the
         # lock object (deviation D8). A plan mutates nothing; the concurrency group
@@ -138,6 +176,7 @@ jobs:
         working-directory: ${{ env.WORKDIR }}
 
       - name: Comment plan on PR
+        if: steps.detect.outputs.infra == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
