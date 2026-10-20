@@ -71,3 +71,9 @@ variable "enable_cloud_nat" {
   type        = bool
   default     = false
 }
+
+variable "enable_firewall_logs" {
+  description = "Log connections the default-deny rule blocks. Cheap at this scale and the difference between a silent drop and a diagnosable one."
+  type        = bool
+  default     = true
+}

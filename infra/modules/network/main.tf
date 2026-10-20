@@ -109,3 +109,40 @@ resource "google_compute_router_nat" "nat" {
 
 # count, not for_each, on those two: this is a true on/off toggle, which is the
 # one case the brief allows it (§5).
+
+# An explicit deny-all ingress rule.
+#
+# A custom-mode VPC already denies ingress by implied rule, so this changes no
+# behaviour — which is the point of the check that asks for it: "no firewall
+# rules" and "deliberately denying everything" look identical from outside, and
+# only one of them is a decision.
+#
+# It also buys something real. The implied rule cannot log; this one can, so
+# blocked connection attempts become visible instead of silently dropped.
+#
+# Priority 65534 sits just above the implied rule, so any allow rule added later
+# (the IAP range 35.235.240.0/20 for a bastion, say) takes precedence without
+# anyone having to edit this.
+resource "google_compute_firewall" "deny_all_ingress" {
+  project     = var.project_id
+  name        = "${var.network_name}-deny-all-ingress"
+  network     = google_compute_network.this.name
+  description = "Explicit default-deny. Add narrower allow rules at lower priority numbers."
+
+  direction = "INGRESS"
+  priority  = 65534
+
+  deny {
+    protocol = "all"
+  }
+
+  source_ranges = ["0.0.0.0/0"]
+
+  dynamic "log_config" {
+    for_each = var.enable_firewall_logs ? [1] : []
+
+    content {
+      metadata = "INCLUDE_ALL_METADATA"
+    }
+  }
+}
