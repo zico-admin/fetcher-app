@@ -163,10 +163,12 @@ decisive is genuinely unknown:
 - `user_project_override` with the seed project as `billing_project` (PR #4),
   plus `roles/serviceusage.serviceUsageConsumer` on seed for both CI identities.
 
-Keeping both is redundant, and the second couples every environment's API quota
-to the seed project — prod would share dev's limits. Worth one experiment at the
-start of M1: remove the quota override, apply, and see whether `roles/browser`
-alone suffices. Whichever survives gets a comment recording the evidence.
+**Resolved by experiment (PR #15).** The quota override was removed and the apply
+on main still succeeded, so `roles/browser` was the fix. The override and the
+`serviceUsageConsumer` grants it required are gone, and prod will not inherit a
+shared quota project. Worth repeating as a habit: when two fixes land together,
+one of them is probably unnecessary, and removing it is cheap while nothing
+depends on it yet.
 
 One prediction of mine was simply wrong: Dependabot pull requests authenticate
 and plan fine, so no credential-free lint path was needed.
