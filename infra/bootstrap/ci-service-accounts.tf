@@ -114,7 +114,11 @@ locals {
     # resourcemanager.projects.get, and the provider reads the project while
     # reconciling every google_project_service.
     #
-    # roles/browser is the narrowest predefined role carrying it: read-only
+    # Proven, not assumed: PR #15 removed the competing fix (user_project_override
+    # billing dev's API calls to the seed project) and the apply on main still
+    # succeeded. This role is what carries it.
+    #
+    # roles/browser is the narrowest predefined role containing it: read-only
     # metadata about projects, folders and the org, and nothing else. Narrower
     # than roles/viewer, which would grant read on every resource in the project.
     # A custom role with the single permission would be narrower still; it is not
@@ -138,19 +142,5 @@ resource "google_project_iam_member" "tf_apply_dev" {
 
   project = google_project.dev.project_id
   role    = each.value
-  member  = google_service_account.tf_apply.member
-}
-
-# Calls made with user_project_override (infra/envs/dev) are billed to the seed
-# project, so both identities need serviceusage.services.use there.
-resource "google_project_iam_member" "tf_plan_quota" {
-  project = google_project.seed.project_id
-  role    = "roles/serviceusage.serviceUsageConsumer"
-  member  = google_service_account.tf_plan.member
-}
-
-resource "google_project_iam_member" "tf_apply_quota" {
-  project = google_project.seed.project_id
-  role    = "roles/serviceusage.serviceUsageConsumer"
   member  = google_service_account.tf_apply.member
 }
