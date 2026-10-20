@@ -125,7 +125,33 @@ locals {
     # worth the maintenance here, because every later milestone needs this same
     # project read.
     "roles/browser",
+
+    # ---- M1 -----------------------------------------------------------------
+    # Predicted from what the M1 resources touch, not from denials, because
+    # discovering eight roles one failed apply at a time would cost eight local
+    # bootstrap applies. The loop still happens for whatever is missing here, and
+    # anything that turns out to be unnecessary should be deleted rather than
+    # left behind "just in case" — an unused grant is still a grant.
+    "roles/compute.networkAdmin",            # VPC, subnet, PSA global address, router/NAT
+    "roles/servicenetworking.networksAdmin", # the service networking peering
+    "roles/cloudsql.admin",                  # instance, databases, IAM database users
+    "roles/artifactregistry.admin",          # repository and its IAM
+    "roles/secretmanager.admin",             # secret containers and their IAM, never values
+    "roles/storage.admin",                   # the menu snapshots bucket and its IAM
+    "roles/iam.serviceAccountAdmin",         # create run-web and run-job
   ])
+
+  # Roles the apply identity is allowed to grant to workload service accounts.
+  # Anything not on this list is refused by the IAM condition below.
+  tf_apply_grantable_roles = [
+    "roles/cloudsql.client",
+    "roles/cloudsql.instanceUser",
+    "roles/logging.logWriter",
+    "roles/monitoring.metricWriter",
+    "roles/secretmanager.secretAccessor",
+    "roles/run.invoker",
+    "roles/aiplatform.user",
+  ]
 }
 
 resource "google_project_iam_member" "tf_plan_dev" {
@@ -138,9 +164,35 @@ resource "google_project_iam_member" "tf_plan_dev" {
 }
 
 resource "google_project_iam_member" "tf_apply_dev" {
+  # checkov:skip=CKV_GCP_49:roles/iam.serviceAccountAdmin is how CI creates the run-web and run-job identities — that work has to belong to Terraform, or workload identities become console artifacts nobody can rebuild. The real risk the check points at, privilege escalation by granting itself a role, is addressed separately: the projectIamAdmin grant below is conditional on an explicit allowlist, so this account cannot grant roles/owner to anything, including itself.
   for_each = local.tf_apply_roles
 
   project = google_project.dev.project_id
   role    = each.value
   member  = google_service_account.tf_apply.member
+}
+
+# The most dangerous grant in the repo, and the reason it is conditional.
+#
+# Managing IAM requires resourcemanager.projectIamAdmin, and an identity holding
+# it unconditionally can grant itself roles/owner — so "least privilege CI" would
+# be a fiction. The condition limits WHICH roles it may grant: modifiedGrantsByRole
+# is evaluated against the roles touched by the call, and hasOnly() refuses the
+# request outright if it touches anything else.
+#
+# Concretely: tf-apply can grant roles/cloudsql.client to run-web, and cannot
+# grant roles/owner to anyone, including itself.
+#
+# Expect to extend tf_apply_grantable_roles as later milestones add workloads.
+# Each addition is a deliberate decision recorded in a diff, which is the point.
+resource "google_project_iam_member" "tf_apply_iam_admin" {
+  project = google_project.dev.project_id
+  role    = "roles/resourcemanager.projectIamAdmin"
+  member  = google_service_account.tf_apply.member
+
+  condition {
+    title       = "only-workload-roles"
+    description = "May grant only the specific roles Fetcher workloads need."
+    expression  = "api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', []).hasOnly([${join(", ", formatlist("'%s'", local.tf_apply_grantable_roles))}])"
+  }
 }
