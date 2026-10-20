@@ -91,6 +91,12 @@ locals {
   tf_plan_roles = toset([
     "roles/viewer",
     "roles/iam.securityReviewer",
+
+    # With user_project_override, every API call a plan makes is billed to the
+    # dev project, and billing a call requires serviceusage.services.use there.
+    # roles/viewer does not carry it. This is the read-only twin of the
+    # serviceUsageAdmin that tf-apply already holds.
+    "roles/serviceusage.serviceUsageConsumer",
   ])
 
   # M0 ONLY.
@@ -139,6 +145,13 @@ locals {
     "roles/secretmanager.admin",             # secret containers and their IAM, never values
     "roles/storage.admin",                   # the menu snapshots bucket and its IAM
     "roles/iam.serviceAccountAdmin",         # create run-web and run-job
+
+    # Added from a denial: "Required 'compute.firewalls.create' permission".
+    # compute.networkAdmin manages networks, subnets and routes but has
+    # read-only access to firewall rules — confirmed by reading the role, which
+    # contains compute.firewalls.get and .list and not .create. Firewall changes
+    # are a security boundary, so Google puts them in a separate role.
+    "roles/compute.securityAdmin",
   ])
 
   # Roles the apply identity is allowed to grant to workload service accounts.
